@@ -9,7 +9,6 @@ app.use((_req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     next();
 });
-app.options('*', (_req, res) => res.sendStatus(204));
 app.use(express.json());
 
 // Token minting

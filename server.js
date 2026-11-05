@@ -367,9 +367,202 @@ async function getSubtitles(imdbId) {
     };
 }
 
+// Build a player-ready manifest (Plyr, Video.js, ExoPlayer, AVPlayer compatible)
+function buildManifest(movieData, subtitleData, serverParam) {
+    const servers = movieData.servers || [];
+    const filtered = serverParam
+        ? servers.filter(s => serverParam === 's1' && s.position === 1
+            || serverParam === 's2' && s.position === 2
+            || serverParam === 's5' && s.position >= 5
+            || s.name.toLowerCase().includes(serverParam.toLowerCase()))
+        : servers;
+
+    const sources = filtered.map(s => ({
+        server: s.name,
+        url: s.video_url,
+        type: 'application/vnd.apple.mpegurl',
+        quality: s.position === 1 ? '1080p' : s.position === 2 ? '720p' : '480p',
+        available: s.available,
+        format: s.format,
+        position: s.position
+    }));
+
+    const tracks = [];
+    if (subtitleData && subtitleData.default_subs && subtitleData.default_subs.tracks) {
+        subtitleData.default_subs.tracks.forEach((t, i) => {
+            tracks.push({
+                id: t.id || t.IDSubtitle || ('track_' + i),
+                name: t.name || t.SubFileName || 'Subtitle ' + (i + 1),
+                language: t.language || t.SubLanguageID || 'eng',
+                format: 'webvtt',
+                url: subtitleData.webvtt_url || NEXUS + '/embed/iframe_player/cache/subs/19/' + (t.id || t.IDSubtitle || '') + '.vtt'
+            });
+        });
+    }
+
+    return {
+        success: movieData.success,
+        title: movieData.title || 'Movie',
+        imdb_id: movieData.imdb_id || '',
+        file_name: movieData.file_name || '',
+        poster: movieData.backdrop || '',
+        thumbnails: movieData.backdrop || '',
+        sources,
+        tracks,
+        track_count: tracks.length,
+        server_count: sources.length,
+        fallback: movieData.fallback || false,
+        error: movieData.error || null
+    };
+}
+
 // ============================
 // Endpoints
 // ============================
+
+/**
+ * GET /manifest.php?path=/embed/movie/746036&server=s2&vid=v_user123
+ * JSON manifest API for custom players (Plyr, Video.js, ExoPlayer, AVPlayer).
+ * Fetches HLS sources, stream URLs, and WebVTT subtitle tracks as JSON.
+ */
+app.get('/manifest.php', async (req, res) => {
+    const path = req.query.path;
+    const server = req.query.server || 's1';
+    const vid = req.query.vid || '';
+
+    if (!path) {
+        return res.status(400).json({
+            success: false,
+            error: 'missing ?path=<embed path>',
+            example: '/manifest.php?path=/embed/movie/746036&server=s2&vid=v_user123'
+        });
+    }
+
+    // Extract TMDB ID from path like /embed/movie/746036 or /embed/movie/tt1234567
+    const match = path.match(/\/embed\/(?:movie|tv)\/([\w-]+)/);
+    if (!match) {
+        return res.status(400).json({
+            success: false,
+            error: 'invalid path format, expected /embed/movie/{id} or /embed/tv/{id}',
+            example: '/manifest.php?path=/embed/movie/746036'
+        });
+    }
+
+    const id = match[1];
+
+    try {
+        // Get movie data (real vidsrc.to flow with fallback)
+        const real = await getRealMovieData(id, 'sequential');
+        const movieData = real.fallback || !real.success
+            ? { ...getFallbackServersMap(id, 'sequential'), fallback: true, title: 'Movie ' + id }
+            : real;
+
+        // Convert fallback array to object shape
+        const movieObj = {
+            success: movieData.success,
+            title: movieData.title,
+            imdb_id: movieData.imdb_id,
+            file_name: movieData.file_name,
+            backdrop: movieData.backdrop,
+            fallback: movieData.fallback,
+            error: movieData.error,
+            servers: movieData.servers || []
+        };
+
+        // Get subtitles
+        const subData = await getSubtitles(movieObj.imdb_id || '');
+
+        // Build manifest
+        const manifest = buildManifest(movieObj, subData, server);
+
+        res.json(manifest);
+    } catch (e) {
+        res.status(502).json({
+            success: false,
+            error: e.message,
+            path,
+            server,
+            vid
+        });
+    }
+});
+
+function getFallbackServersMap(tmdb, namingMode) {
+    const servers = getFallbackServers(tmdb, namingMode);
+    return { servers, success: false };
+}
+
+/**
+ * GET /embed/movie/:id - Embed route that returns manifest JSON
+ * Compatible with apiplayer.ru embed routes
+ */
+app.get('/embed/movie/:id', async (req, res) => {
+    const id = req.params.id;
+    const server = req.query.server || 's1';
+    const vid = req.query.vid || '';
+
+    try {
+        const real = await getRealMovieData(id, 'sequential');
+        const movieData = real.fallback || !real.success
+            ? { ...getFallbackServersMap(id, 'sequential'), fallback: true, title: 'Movie ' + id }
+            : real;
+
+        const movieObj = {
+            success: movieData.success,
+            title: movieData.title,
+            imdb_id: movieData.imdb_id,
+            file_name: movieData.file_name,
+            backdrop: movieData.backdrop,
+            fallback: movieData.fallback,
+            error: real.error,
+            servers: movieData.servers || []
+        };
+
+        const subData = await getSubtitles(movieObj.imdb_id || '');
+        const manifest = buildManifest(movieObj, subData, server);
+
+        res.json(manifest);
+    } catch (e) {
+        res.status(502).json({ success: false, error: e.message, id });
+    }
+});
+
+/**
+ * GET /embed/tv/:id/:season/:episode - TV embed route (manifest JSON)
+ */
+app.get('/embed/tv/:id/:season/:episode', async (req, res) => {
+    const id = req.params.id;
+    const season = req.params.season;
+    const episode = req.params.episode;
+    const server = req.query.server || 's1';
+
+    try {
+        const real = await getRealMovieData(id, 'sequential');
+        const movieData = real.fallback || !real.success
+            ? { ...getFallbackServersMap(id, 'sequential'), fallback: true, title: 'Movie ' + id }
+            : real;
+
+        const movieObj = {
+            success: movieData.success,
+            title: movieData.title,
+            imdb_id: movieData.imdb_id,
+            file_name: movieData.file_name,
+            backdrop: movieData.backdrop,
+            fallback: movieData.fallback,
+            error: real.error,
+            servers: movieData.servers || []
+        };
+
+        const subData = await getSubtitles(movieObj.imdb_id || '');
+        const manifest = buildManifest(movieObj, subData, server);
+        manifest.season = parseInt(season);
+        manifest.episode = parseInt(episode);
+
+        res.json(manifest);
+    } catch (e) {
+        res.status(502).json({ success: false, error: e.message, id, season, episode });
+    }
+});
 
 /**
  * GET /api/movie/:tmdb_id
@@ -511,6 +704,9 @@ if (require.main === module) {
         console.log('  GET /api/sub/:imdb_id          -> subtitle tracks');
         console.log('  GET /api/sub/:imdb_id/:sId     -> WebVTT subtitle URL');
         console.log('  GET /api/player                -> player placeholder');
+        console.log('  GET /manifest.php              -> JSON manifest for custom players');
+        console.log('  GET /embed/movie/:id           -> embed route manifest JSON');
+        console.log('  GET /embed/tv/:id/:s/:e        -> TV embed route manifest JSON');
         console.log('');
         console.log('Server ordering:');
         console.log('  0: Fireworks (first)');
@@ -520,7 +716,7 @@ if (require.main === module) {
         console.log('');
         console.log('Token minting: IP-authorized via /generate.php (IP 143.44.168.54)');
         console.log('OpenSubtitles: https://rest.opensubtitles.org/search/imdbid-.../sublanguageid-eng');
-        console.log('WebVTT URLs: ${NEXUS}/embed/iframe_player/cache/subs/19/{IDSubtitleFile}.vtt');
+        console.log('WebVTT URLs: https://stellarconductornexus.com/embed/iframe_player/cache/subs/19/{IDSubtitleFile}.vtt');
     });
 }
 

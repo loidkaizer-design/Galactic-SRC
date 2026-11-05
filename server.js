@@ -101,7 +101,7 @@ app.get('/api/sub/:imdb_id', (req, res) => {
 app.get('/api/sub/:imdb_id/:subtitle_id', (req, res) => {
     const subtitleId = req.params.subtitle_id;
     if (!subtitleId) return res.status(400).json({ success: false, error: 'missing :subtitle_id' });
-    res.json({ success: true, imdb_id: req.params.imdb_id, subtitle_id, webvtt_url: `https://stellarconductornexus.com/embed/iframe_player/cache/subs/19/${subtitleId}.vtt`, format: 'webvtt' });
+    res.json({ success: true, imdb_id: req.params.imdb_id, subtitle_id: subtitleId, webvtt_url: `https://stellarconductornexus.com/embed/iframe_player/cache/subs/19/${subtitleId}.vtt`, format: 'webvtt' });
 });
 app.get('/api/player', (req, res) => res.json({ success: true, message: 'Player endpoint - video player will be uploaded and connected later', endpoint: '/api/player', status: 'placeholder' }));
 

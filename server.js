@@ -105,7 +105,13 @@ app.get('/api/sub/:imdb_id/:subtitle_id', (req, res) => {
 });
 app.get('/api/player', (req, res) => res.json({ success: true, message: 'Player endpoint - video player will be uploaded and connected later', endpoint: '/api/player', status: 'placeholder' }));
 
-// Start server
+// Error handling middleware - catches async errors in route handlers
+app.use((err, req, res, next) => {
+    console.error('Galactic Error:', err.message);
+    res.status(500).json({ success: false, error: 'internal server error' });
+});
+
+// Start server (only runs locally, not in Vercel serverless)
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`galactic API listening on http://localhost:${PORT}`);

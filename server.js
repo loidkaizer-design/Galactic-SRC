@@ -74,6 +74,7 @@ const SERVERS = [
 ];
 
 // Endpoints
+app.get('/', (_req, res) => res.type('text').send('No Valid Movie ID'));
 app.get('/health', (req, res) => res.json({ ok: true, project: 'galactic' }));
 app.get('/api/movie/:tmdb_id', (req, res) => {
     const tmdb = req.params.tmdb_id;
